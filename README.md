@@ -45,4 +45,8 @@ npm run dev
 - `GET /api/reports/{user_id}`：用户最新报告
 - `GET /api/reports/{user_id}/{month}`：用户指定月份报告
 
-这里以阿里云百炼平台为例，不同运营商对应的名字不同，配置 API key 环境变量方法为：打开本地 powershell 或 cmd ，输入命令：setx DASHSCOPE_API_KEY "sk-你的API_KEY"。如果未配置 API key，后端仍可启动，并使用本地检索与报告模板兜底；配置 key 后会调用 DashScope 的 DeepSeek 模型生成回答。当前依赖无数据库/向量服务即可运行，TXT 已直接索引；原有 Chroma 与 PDF 文件保留，后续可替换 `KnowledgeBase` 接入生产级解析和向量检索。
+这里以阿里云百炼平台为例，不同运营商对应的名字不同，配置 API key 环境变量方法为：打开本地 powershell 或 cmd ，输入命令：
+```powershell
+setx DASHSCOPE_API_KEY "sk-你的API_KEY"
+```
+如果未配置 API key，后端仍可启动，并使用本地检索与报告模板兜底；配置 key 后会调用 DashScope 的 DeepSeek 模型生成回答。当前依赖无数据库/向量服务即可运行，TXT 已直接索引；原有 Chroma 与 PDF 文件保留，后续可替换 `KnowledgeBase` 接入生产级解析和向量检索。
