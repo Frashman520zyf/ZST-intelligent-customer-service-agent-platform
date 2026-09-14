@@ -4,7 +4,6 @@ import {
   Activity,
   AlertCircle,
   ArrowUpRight,
-  Bot,
   BookOpen,
   Check,
   CheckCircle2,
@@ -30,6 +29,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Tab = "chat" | "report" | "knowledge" | "tickets" | "monitoring" | "evaluation";
@@ -161,17 +161,76 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/
 const USER_ID = "1001";
 const quickPrompts = ["扫地机器人总是漏扫，怎么排查？", "拖布有异味需要怎么清洁？", "帮我生成本月使用报告"];
 
+type RobotAvatarProps = {
+  size?: number;
+  alt?: string;
+  priority?: boolean;
+  className?: string;
+};
+
+function RobotAvatar({ size = 28, alt = "智扫通客服机器人", priority = false, className }: RobotAvatarProps) {
+  return (
+    <Image
+      src="/robot-assistant.png"
+      alt={alt}
+      width={size}
+      height={size}
+      priority={priority}
+      className={className}
+      style={{ width: size, height: size, display: "block", objectFit: "cover", borderRadius: "inherit" }}
+    />
+  );
+}
+
+function formatRequestErrorDetail(value: unknown): string {
+  if (typeof value === "string" && value.trim()) return value;
+  if (Array.isArray(value)) {
+    const messages = value.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        const detail = item as Record<string, unknown>;
+        const message = typeof detail.msg === "string" ? detail.msg : typeof detail.message === "string" ? detail.message : "";
+        const location = Array.isArray(detail.loc) ? `（${detail.loc.filter((part) => typeof part === "string" || typeof part === "number").join(".")}）` : "";
+        if (message) return `${message}${location}`;
+        try {
+          return JSON.stringify(item);
+        } catch {
+          return "请求参数不合法";
+        }
+      }
+      return String(item);
+    }).filter(Boolean);
+    if (messages.length) return messages.join("；");
+  }
+  if (value && typeof value === "object") {
+    const detail = value as Record<string, unknown>;
+    if (typeof detail.message === "string" && detail.message.trim()) return detail.message;
+    try {
+      const serialized = JSON.stringify(value);
+      if (serialized && serialized !== "{}") return serialized;
+    } catch {
+      // Keep the generic message when the response cannot be serialized.
+    }
+  }
+  return "请求失败";
+}
+
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) {
-    let detail = "请求失败";
+    let detail: unknown;
     try {
-      const body = (await response.json()) as { detail?: string };
-      detail = body.detail ?? detail;
+      const body = (await response.json()) as { detail?: unknown; message?: unknown } | unknown;
+      if (body && typeof body === "object" && !Array.isArray(body)) {
+        const payload = body as { detail?: unknown; message?: unknown };
+        detail = payload.detail ?? payload.message ?? body;
+      } else {
+        detail = body;
+      }
     } catch {
       // Keep the generic message when the server did not return JSON.
     }
-    throw new Error(detail);
+    throw new Error(formatRequestErrorDetail(detail));
   }
   return (await response.json()) as T;
 }
@@ -408,11 +467,12 @@ export default function Home() {
 
   async function searchKnowledge(event?: FormEvent) {
     event?.preventDefault();
-    if (!knowledgeQuery.trim()) return;
+    const query = knowledgeQuery.trim();
+    if (!query || loading) return;
     setLoading(true);
     setError("");
     try {
-      const data = await getJson<{ results?: Source[]; strategy?: string }>(`${API_BASE}/knowledge/search?query=${encodeURIComponent(knowledgeQuery)}`);
+      const data = await getJson<{ results?: Source[]; strategy?: string }>(`${API_BASE}/knowledge/search?query=${encodeURIComponent(query)}`);
       setKnowledgeResults(data.results ?? []);
       if (data.strategy) setKnowledgeStrategy(data.strategy);
     } catch (requestError) {
@@ -488,7 +548,7 @@ export default function Home() {
     <main className="app-shell">
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="brand-row">
-          <div className="brand-mark"><Bot size={20} strokeWidth={2.5} /></div>
+          <div className="brand-mark"><RobotAvatar size={36} alt="智扫通品牌标识" priority /></div>
           <div><strong>智扫通</strong><span>SMART CARE OPS</span></div>
           <button className="icon-button mobile-close" onClick={() => setMobileNav(false)} aria-label="关闭菜单"><X size={18} /></button>
         </div>
@@ -529,7 +589,7 @@ export default function Home() {
               <div className="panel-header"><div><div className="panel-kicker"><span className="live-indicator" />LIVE ASSIST</div><h2>对话工作区</h2></div><button className="subtle-button" onClick={clearConversation}><RefreshCw size={15} />新对话</button></div>
               <div className="chat-stream">
                 {messages.map((message, index) => <div className={`message-row ${message.role}`} key={`${message.role}-${index}`}>
-                  <div className="message-avatar">{message.role === "assistant" ? <Bot size={16} /> : <UserRound size={16} />}</div>
+                  <div className="message-avatar">{message.role === "assistant" ? <RobotAvatar size={29} alt="智扫通客服头像" /> : <UserRound size={16} aria-hidden="true" />}</div>
                   <div className="message-bubble">
                     <div className="message-label">{message.role === "assistant" ? "智扫通客服" : "你"}</div>
                     <div className="message-content">{formatAnswer(message.content)}</div>
@@ -544,18 +604,18 @@ export default function Home() {
                     {message.feedbackRating ? <div className="feedback-done"><Check size={13} />感谢反馈，已纳入评测闭环</div> : null}
                   </div>
                 </div>)}
-                {loading ? <div className="message-row assistant"><div className="message-avatar"><Bot size={16} /></div><div className="message-bubble loading-bubble"><div className="message-label">智扫通客服</div><span className="typing"><i /><i /><i /></span></div></div> : null}
+                {loading ? <div className="message-row assistant"><div className="message-avatar"><RobotAvatar size={29} alt="智扫通客服正在输入" /></div><div className="message-bubble loading-bubble"><div className="message-label">智扫通客服</div><span className="typing" aria-label="客服正在输入"><i /><i /><i /></span></div></div> : null}
               </div>
               <div className="quick-prompts">{quickPrompts.map((prompt) => <button key={prompt} onClick={() => setInput(prompt)}>{prompt}<ArrowUpRight size={13} /></button>)}</div>
-              <form className="composer" onSubmit={sendMessage}><textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder="描述设备型号、故障现象或想了解的功能…" rows={2} /><button className="send-button" type="submit" aria-label="发送消息"><Send size={18} /></button></form>
+              <form className="composer" onSubmit={sendMessage}><textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder="描述设备型号、故障现象或想了解的功能…" rows={2} maxLength={4000} aria-label="客服消息输入框" /><button className="send-button" type="submit" aria-label="发送消息" disabled={!input.trim() || loading}><Send size={18} aria-hidden="true" /></button></form>
               <div className="composer-footer"><span><Sparkles size={14} />回答基于知识库与用户使用记录</span><span>Enter 发送 · Shift + Enter 换行</span></div>
             </section>
-            <aside className="side-stack"><section className="panel context-panel"><div className="panel-header compact"><div><div className="panel-kicker">CURRENT CONTEXT</div><h3>演示设备档案</h3></div><button className="icon-button" aria-label="编辑演示设备档案"><Wrench size={16} /></button></div><div className="device-summary"><div className="device-icon"><Bot size={23} /></div><div><strong>智扫 S8 Pro</strong><span>扫拖一体 · 模拟在线</span></div><span className="device-status">演示数据</span></div><div className="context-stats"><div><span>居住面积</span><strong>65㎡</strong></div><div><span>地面类型</span><strong>木地板</strong></div><div><span>本月覆盖率</span><strong>{completion || 90}%</strong></div></div></section><section className="panel source-panel"><div className="panel-header compact"><div><div className="panel-kicker">EVIDENCE</div><h3>本次参考资料</h3></div><Database size={17} className="muted-icon" /></div>{sources.length ? sources.map((source) => <div className="source-item" key={`${source.source}-${source.chunk_id ?? source.score}`}><div><strong>{source.source.replace(/^data[\\/]/, "")}</strong><span>{source.citation ?? (source.page ? `第 ${source.page} 页` : "知识库片段")}</span><small>{source.excerpt}</small></div><span className="score">{Math.round(source.score * 100)}%</span></div>) : <div className="empty-state"><BookOpen size={20} /><span>发送问题后，这里会显示回答所依据的资料。</span></div>}</section></aside>
+            <aside className="side-stack"><section className="panel context-panel"><div className="panel-header compact"><div><div className="panel-kicker">CURRENT CONTEXT</div><h3>演示设备档案</h3></div><button className="icon-button" onClick={() => setError("演示设备档案为只读数据")} aria-label="查看演示设备档案"><Wrench size={16} aria-hidden="true" /></button></div><div className="device-summary"><div className="device-icon"><RobotAvatar size={37} alt="智扫 S8 Pro 设备图标" /></div><div><strong>智扫 S8 Pro</strong><span>扫拖一体 · 模拟在线</span></div><span className="device-status">演示数据</span></div><div className="context-stats"><div><span>居住面积</span><strong>65㎡</strong></div><div><span>地面类型</span><strong>木地板</strong></div><div><span>本月覆盖率</span><strong>{completion || 90}%</strong></div></div></section><section className="panel source-panel"><div className="panel-header compact"><div><div className="panel-kicker">EVIDENCE</div><h3>本次参考资料</h3></div><Database size={17} className="muted-icon" /></div>{sources.length ? sources.map((source) => <div className="source-item" key={`${source.source}-${source.chunk_id ?? source.score}`}><div><strong>{source.source.replace(/^data[\\/]/, "")}</strong><span>{source.citation ?? (source.page ? `第 ${source.page} 页` : "知识库片段")}</span><small>{source.excerpt}</small></div><span className="score">{Math.round(source.score * 100)}%</span></div>) : <div className="empty-state"><BookOpen size={20} /><span>发送问题后，这里会显示回答所依据的资料。</span></div>}</section></aside>
           </div> : null}
 
           {tab === "report" ? <section className="report-layout"><div className="report-main"><div className="report-toolbar"><div><div className="panel-kicker">PERSONAL USAGE REPORT</div><h2>智扫通扫地机器人使用情况报告</h2></div><label className="select-wrap">报告月份<select value={selectedMonth} onChange={(event) => void loadReport(event.target.value)}>{(report?.months ?? ["2025-12"]).map((month) => <option value={month} key={month}>{month}</option>)}</select></label></div>{report ? <><div className="metric-grid"><div className="metric-card primary"><span>清洁覆盖率</span><strong>{completion || "—"}<small>%</small></strong><div className="metric-bar"><i style={{ width: `${completion || 0}%` }} /></div><em>本月平均表现</em></div><div className="metric-card"><span>日均清扫</span><strong>{report.efficiency.match(/日均清扫:([^\n]+)/)?.[1] ?? "—"}</strong><em>来自演示使用记录</em></div><div className="metric-card"><span>同类用户对比</span><strong className="metric-text">{report.comparison.match(/优于[^（(]+/)?.[0] ?? "已生成"}</strong><em>基于演示样本</em></div></div><div className="report-columns"><div className="report-section"><div className="section-title"><Activity size={17} />清洁表现</div><p>{report.efficiency}</p><div className="section-title"><Wrench size={17} />耗材状态</div><p>{report.consumables}</p></div><div className="recommendation"><div className="recommendation-head"><Sparkles size={18} /><span>售后建议</span></div><h3>把下一次维护安排在问题发生之前</h3><p>根据本月耗材状态，建议按剩余寿命安排主刷与滤网更换，并保持每周一次深度清洁。若出现持续漏扫、异常噪音或回充失败，请在咨询时附上设备型号与故障视频。</p><button className="text-button" onClick={() => { navigate("chat"); setInput("根据我的使用报告，给我具体的保养建议"); }}>咨询客服 <ArrowUpRight size={15} /></button></div></div><div className="report-footnote"><CheckCircle2 size={15} />报告生成于 {report.month} · 记录来源：本地演示数据</div></> : <div className="empty-large"><FileText size={28} /><h3>暂无报告数据</h3><p>选择其他用户或月份后重试。</p></div>}</div><aside className="report-aside panel"><div className="panel-kicker">REPORT GUIDE</div><h3>本报告包含什么</h3><div className="guide-list"><div><span>01</span><p><strong>清洁表现</strong><br />覆盖率、清扫量和漏扫情况</p></div><div><span>02</span><p><strong>耗材状态</strong><br />主刷、边刷、滤网的维护提醒</p></div><div><span>03</span><p><strong>个性化建议</strong><br />结合家庭环境给出的售后动作</p></div></div></aside></section> : null}
 
-          {tab === "knowledge" ? <section className="knowledge-layout"><div className="knowledge-main panel"><div className="panel-header"><div><div className="panel-kicker">KNOWLEDGE RETRIEVAL</div><h2>资料检索</h2></div><span className="knowledge-count">{knowledgeStrategy.replaceAll("_", " · ").toUpperCase()}</span></div><form className="search-form" onSubmit={searchKnowledge}><Search size={19} /><input value={knowledgeQuery} onChange={(event) => setKnowledgeQuery(event.target.value)} placeholder="搜索故障、维护、选购或功能关键词…" /><button type="submit" disabled={loading}>{loading ? "检索中" : "检索"}</button></form>{knowledgeResults.length ? <div className="results-list">{knowledgeResults.map((item) => <article className="result-item" key={`${item.source}-${item.chunk_id ?? item.score}`}><div className="result-title"><FileText size={16} /><strong>{item.source.replace(/^data[\\/]/, "")}</strong><span>{Math.round(item.score * 100)}% 匹配</span></div><div className="result-citation">{item.citation ?? (item.page ? `第 ${item.page} 页` : "知识库片段")}{item.chunk_id ? ` · ${item.chunk_id.slice(0, 12)}` : ""}</div><p>{item.excerpt}</p><button className="text-button" onClick={() => { navigate("chat"); setInput(`请结合资料“${item.source}”说明：${knowledgeQuery}`); }}>带入客服对话 <ArrowUpRight size={14} /></button></article>)}</div> : <div className="empty-large"><BookOpen size={31} /><h3>开始检索知识库</h3><p>输入一个故障现象或保养关键词，获取最相关的资料片段。</p></div>}</div><aside className="knowledge-aside"><div className="stat-strip"><div><strong>{knowledgeIndex?.sources ?? "—"}</strong><span>主题资料</span></div><div><strong>{knowledgeIndex?.chunks ?? "—"}</strong><span>索引片段</span></div><div><strong>{knowledgeIndex?.vocabulary ?? "—"}</strong><span>词汇量</span></div></div><section className="panel topic-panel"><div className="panel-kicker">TOPICS</div><h3>常用主题</h3><div className="topic-list">{["故障排除", "维护保养", "选购指南", "扫拖一体机器人", "常见问题"].map((topic) => <button key={topic} onClick={() => setKnowledgeQuery(topic)}><span>{topic}</span><ChevronRight size={15} /></button>)}</div></section><section className="panel index-panel"><div className="panel-kicker">INDEX STATUS</div><div className="index-status-row"><span className={knowledgeIndex?.ready ? "status-dot online" : "status-dot"}>{knowledgeIndex?.ready ? "可检索" : "未就绪"}</span><span>{knowledgeIndex?.built_at ? formatTime(knowledgeIndex.built_at) : "等待构建"}</span></div>{knowledgeIndex?.parse_errors?.length ? <p className="index-warning">解析告警 {knowledgeIndex.parse_errors.length} 条</p> : <p>PDF/TXT 文档已进行增量索引。</p>}</section></aside></section> : null}
+          {tab === "knowledge" ? <section className="knowledge-layout"><div className="knowledge-main panel"><div className="panel-header"><div><div className="panel-kicker">KNOWLEDGE RETRIEVAL</div><h2>资料检索</h2></div><span className="knowledge-count">{knowledgeStrategy.replaceAll("_", " · ").toUpperCase()}</span></div><form className="search-form" onSubmit={searchKnowledge}><Search size={19} aria-hidden="true" /><input value={knowledgeQuery} onChange={(event) => setKnowledgeQuery(event.target.value)} placeholder="搜索故障、维护、选购或功能关键词…" maxLength={200} aria-label="知识库搜索关键词" /><button type="submit" disabled={!knowledgeQuery.trim() || loading} aria-label="检索知识库">{loading ? "检索中" : "检索"}</button></form>{knowledgeResults.length ? <div className="results-list">{knowledgeResults.map((item) => <article className="result-item" key={`${item.source}-${item.chunk_id ?? item.score}`}><div className="result-title"><FileText size={16} aria-hidden="true" /><strong>{item.source.replace(/^data[\\/]/, "")}</strong><span>{Math.round(item.score * 100)}% 匹配</span></div><div className="result-citation">{item.citation ?? (item.page ? `第 ${item.page} 页` : "知识库片段")}{item.chunk_id ? ` · ${item.chunk_id.slice(0, 12)}` : ""}</div><p>{item.excerpt}</p><button className="text-button" onClick={() => { navigate("chat"); setInput(`请结合资料“${item.source}”说明：${knowledgeQuery}`); }} aria-label={`将资料 ${item.source} 带入客服对话`}>带入客服对话 <ArrowUpRight size={14} aria-hidden="true" /></button></article>)}</div> : <div className="empty-large"><BookOpen size={31} /><h3>开始检索知识库</h3><p>输入一个故障现象或保养关键词，获取最相关的资料片段。</p></div>}</div><aside className="knowledge-aside"><div className="stat-strip"><div><strong>{knowledgeIndex?.sources ?? "—"}</strong><span>主题资料</span></div><div><strong>{knowledgeIndex?.chunks ?? "—"}</strong><span>索引片段</span></div><div><strong>{knowledgeIndex?.vocabulary ?? "—"}</strong><span>词汇量</span></div></div><section className="panel topic-panel"><div className="panel-kicker">TOPICS</div><h3>常用主题</h3><div className="topic-list">{["故障排除", "维护保养", "选购指南", "扫拖一体机器人", "常见问题"].map((topic) => <button key={topic} onClick={() => setKnowledgeQuery(topic)} aria-label={`按主题搜索${topic}`}><span>{topic}</span><ChevronRight size={15} aria-hidden="true" /></button>)}</div></section><section className="panel index-panel"><div className="panel-kicker">INDEX STATUS</div><div className="index-status-row"><span className={knowledgeIndex?.ready ? "status-dot online" : "status-dot"}>{knowledgeIndex?.ready ? "可检索" : "未就绪"}</span><span>{knowledgeIndex?.built_at ? formatTime(knowledgeIndex.built_at) : "等待构建"}</span></div>{knowledgeIndex?.parse_errors?.length ? <p className="index-warning">解析告警 {knowledgeIndex.parse_errors.length} 条</p> : <p>PDF/TXT 文档已进行增量索引。</p>}</section></aside></section> : null}
 
           {tab === "tickets" ? <section className="operations-layout"><div className="panel operations-main"><div className="panel-header"><div><div className="panel-kicker">HUMAN HANDOFF</div><h2>售后工单</h2></div><button className="subtle-button" onClick={() => void loadTickets()}><RefreshCw size={15} />刷新</button></div>{sectionLoading ? <div className="loading-state"><LoaderCircle className="spin" size={20} />加载工单…</div> : tickets.length ? <div className="ticket-list">{tickets.map((ticket) => <article className="ticket-item" key={ticket.id}><div className="ticket-main"><div className="ticket-title"><Ticket size={16} /><strong>{ticket.subject}</strong><span className={`priority priority-${ticket.priority}`}>{priorityLabel(ticket.priority)}</span></div><p>{ticket.description}</p><div className="ticket-meta"><span>#{ticket.id}</span><span>{formatTime(ticket.created_at)}</span><span>{ticket.category}</span>{ticket.assigned_to ? <span>负责人：{ticket.assigned_to}</span> : null}</div></div><div className="ticket-actions"><span className={`status-pill status-${ticket.status}`}>{ticketStatusLabel(ticket.status)}</span><select value={ticket.status} onChange={(event) => void updateTicket(ticket.id, event.target.value as Ticket["status"])} aria-label={`更新工单 ${ticket.id} 状态`}><option value="open">待处理</option><option value="pending">等待用户</option><option value="in_progress">处理中</option><option value="resolved">已解决</option><option value="closed">已关闭</option></select></div></article>)}</div> : <div className="empty-large"><Ticket size={30} /><h3>暂无售后工单</h3><p>触发转人工或安全事故意图后，工单会自动出现在这里。</p></div>}</div><aside className="operations-aside"><div className="stat-strip"><div><strong>{tickets.filter((item) => ["open", "pending", "in_progress"].includes(item.status)).length}</strong><span>未关闭</span></div><div><strong>{tickets.filter((item) => item.priority === "urgent").length}</strong><span>紧急</span></div><div><strong>{tickets.length}</strong><span>总工单</span></div></div><section className="panel process-panel"><div className="panel-kicker">HANDOFF FLOW</div><h3>自动转人工链路</h3><div className="flow-step"><span>01</span><p><strong>意图识别</strong><br />识别投诉、安全和复杂售后意图</p></div><div className="flow-step"><span>02</span><p><strong>创建工单</strong><br />保留 trace、对话与设备上下文</p></div><div className="flow-step"><span>03</span><p><strong>人工跟进</strong><br />在状态变更后回写监控事件</p></div></section></aside></section> : null}
 

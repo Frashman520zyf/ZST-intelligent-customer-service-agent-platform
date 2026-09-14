@@ -79,4 +79,4 @@ setx DASHSCOPE_API_KEY "sk-你的API_KEY"
 ```
 如果未配置 API key，后端仍可启动，并使用本地检索与报告模板兜底；配置 key 后会调用 DashScope 的 DeepSeek 模型生成回答。当前依赖无数据库/向量服务即可运行，TXT 和有文本层的 PDF 会直接索引；原有 Chroma 数据保留，可按需替换 `KnowledgeBase` 的检索实现。
 
-向量层默认使用离线、确定性的 hash embedding，便于直接演示。要使用 DashScope 的真实向量模型，可设置 `DASHSCOPE_EMBEDDING_MODE=dashscope`；模型默认是 `text-embedding-v3`，也可通过 `DASHSCOPE_EMBEDDING_MODEL` 覆盖。远程 embedding 不可用时会自动降级到 TF-IDF 与关键词检索，索引、SQLite 记忆和监控数据均为本地运行时文件，不会提交到 Git。
+向量层默认使用离线、确定性的 hash embedding，便于直接演示。要使用 DashScope 的真实向量模型，可设置 `DASHSCOPE_EMBEDDING_MODE=dashscope`；模型默认是 `text-embedding-v3`，也可通过 `DASHSCOPE_EMBEDDING_MODEL` 覆盖。远程 embedding 不可用时会自动降级到 TF-IDF 与关键词检索。
