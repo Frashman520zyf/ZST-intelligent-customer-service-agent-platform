@@ -24,7 +24,10 @@ pnpm-debug.log*
 
 # Rebuildable vector stores and local databases
 **/chroma_db/
+.retrieval_index/
+**/.retrieval_index/
 *.sqlite3
+*.db
 *.bin
 
 # Runtime logs and generated state

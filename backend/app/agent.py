@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime
 from uuid import uuid4
@@ -35,7 +36,18 @@ def _is_report(message: str) -> bool:
 
 
 def _source_items(hits: list[KnowledgeHit]) -> list[SourceItem]:
-    return [SourceItem(source=hit.source, excerpt=hit.content[:180], score=hit.score) for hit in hits]
+    return [
+        SourceItem(
+            source=hit.source,
+            excerpt=hit.content[:180],
+            score=hit.score,
+            citation=hit.citation,
+            page=(hit.metadata or {}).get("page") if hit.metadata else None,
+            chunk_id=hit.chunk_id,
+            metadata=hit.metadata or {},
+        )
+        for hit in hits
+    ]
 
 
 class SupportAgent:
@@ -50,16 +62,74 @@ class SupportAgent:
         intent = "report" if _is_report(request.message) else "support"
         context = ""
         hits: list[KnowledgeHit] = []
+        retrieval: dict[str, object] = {}
         if intent == "report":
             months = self.records.months(request.user_id)
             month = _month_from_message(request.message, months)
             report = self.records.report(request.user_id, month)
             context = str(report or "没有找到该用户对应月份的使用记录")
+            retrieval = {"strategy": "usage_records", "sources": 0, "citations": []}
         else:
-            context, hits = self.knowledge.context(request.message)
+            # Call the explicit RAG tool so the answer and monitoring layer
+            # share one traceable retrieval operation.  The fallback keeps
+            # compatibility with injected test doubles exposing only context.
+            try:
+                tool_result = await asyncio.to_thread(
+                    self.knowledge.rag_search,
+                    request.message,
+                    top_k=settings.retrieval_top_k,
+                    max_chars=settings.retrieval_context_chars,
+                    diversify_by_source=True,
+                )
+                context = tool_result.context
+                hits = [
+                    KnowledgeHit(
+                        source=hit.source,
+                        content=hit.content,
+                        score=hit.score,
+                        chunk_id=hit.id,
+                        citation=hit.citation,
+                        metadata=dict(hit.chunk.metadata),
+                        lexical_score=hit.lexical_score,
+                        keyword_score=hit.keyword_score,
+                        vector_score=hit.vector_score,
+                        rank=hit.rank,
+                    )
+                    for hit in tool_result.hits
+                ]
+                retrieval = {
+                    "strategy": tool_result.strategy,
+                    "latency_ms": round(tool_result.latency_ms, 3),
+                    "sources": len(hits),
+                    "citations": tool_result.citations,
+                    "index": tool_result.metadata.get("index_stats", {}),
+                }
+            except Exception as exc:
+                # Retrieval is an enhancement around the answer generator. If
+                # a parser, index file, or optional embedding provider fails,
+                # keep the conversation alive through the compatibility path
+                # and expose the failure in the trace for monitoring.
+                context, hits = await asyncio.to_thread(
+                    self.knowledge.context,
+                    request.message,
+                )
+                retrieval = {
+                    "strategy": "legacy_context",
+                    "sources": len(hits),
+                    "citations": [item.citation for item in hits if item.citation],
+                    "error": "retrieval_unavailable",
+                    "error_type": type(exc).__name__,
+                }
 
         history = [{"role": item.role, "content": item.content} for item in request.history[-12:]]
-        user_content = f"用户问题：{request.message}\n\n参考上下文：\n{context or '暂无匹配资料'}"
+        memory_context = request.memory_context or "暂无已保存的用户偏好或设备事实"
+        intent_hint = request.intent_hint or intent
+        user_content = (
+            f"路由意图：{intent_hint}\n"
+            f"用户问题：{request.message}\n\n"
+            f"已知用户记忆：\n{memory_context}\n\n"
+            f"参考上下文（仅可据此回答）：\n{context or '暂无匹配资料'}"
+        )
         answer = await self.llm.complete(
             [{"role": "system", "content": SYSTEM_PROMPT}, *history, {"role": "user", "content": user_content}]
         )
@@ -74,6 +144,7 @@ class SupportAgent:
             report=report,
             model=settings.model,
             fallback=fallback,
+            retrieval=retrieval,
         )
 
     @staticmethod

@@ -21,6 +21,14 @@ class Settings:
         "ALLOWED_ORIGINS",
         "http://localhost:3000,http://127.0.0.1:3000",
     )
+    # Retrieval defaults are intentionally lightweight/offline.  Set
+    # ``DASHSCOPE_EMBEDDING_MODE=dashscope`` to use the configured DashScope
+    # embedding endpoint; failures fall back to lexical/hash retrieval.
+    embedding_mode: str = os.getenv("DASHSCOPE_EMBEDDING_MODE", "hash")
+    embedding_model: str = os.getenv("DASHSCOPE_EMBEDDING_MODEL", "text-embedding-v3")
+    embedding_dimensions: int = int(os.getenv("HASH_EMBEDDING_DIMENSIONS", "384"))
+    retrieval_context_chars: int = int(os.getenv("RETRIEVAL_CONTEXT_CHARS", "6000"))
+    retrieval_top_k: int = int(os.getenv("RETRIEVAL_TOP_K", "5"))
 
     @property
     def origins(self) -> list[str]:
@@ -37,6 +45,14 @@ class Settings:
     @property
     def prompts_path(self) -> Path:
         return self.project_root / "prompts"
+
+    @property
+    def retrieval_index_path(self) -> Path:
+        return self.project_root / ".retrieval_index"
+
+    @property
+    def loop_db_path(self) -> Path:
+        return self.project_root / "data" / "agent_loop.db"
 
 
 settings = Settings()
